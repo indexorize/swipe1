@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hand Swipe</title>
+<style>
+  body { margin:0; font-family:Arial,sans-serif; background:#111; color:#fff; }
+  #slides { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; height:100vh; scroll-behavior:smooth; }
+  .slide { flex:0 0 100%; scroll-snap-align:center; display:flex; align-items:center; justify-content:center; font-size:48px; }
+  .s1{background:#c0392b}.s2{background:#2980b9}.s3{background:#27ae60}.s4{background:#8e44ad}
+  #ui { position:fixed; top:10px; left:10px; z-index:5; }
+  #start { padding:12px 18px; font-size:16px; }
+  #status { margin-top:8px; font-size:14px; background:#000a; padding:4px 8px; border-radius:6px; }
+  video { position:fixed; bottom:10px; right:10px; width:120px; border-radius:8px; transform:scaleX(-1); opacity:.8; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <button id="start">Start camera</button>
+  <div id="status">Press Start, then wave your hand left or right</div>
+</div>
+<div id="slides">
+  <div class="slide s1">Slide 1</div>
+  <div class="slide s2">Slide 2</div>
+  <div class="slide s3">Slide 3</div>
+  <div class="slide s4">Slide 4</div>
+</div>
+<video id="video" playsinline muted></video>
+<canvas id="c" width="64" height="48" style="display:none"></canvas>
+
+<script>
+  const video = document.getElementById("video");
+  const slides = document.getElementById("slides");
+  const statusEl = document.getElementById("status");
+  const ctx = document.getElementById("c").getContext("2d", { willReadFrequently: true });
+  const W = 64, H = 48;
+  let prev = null, track = [], lastSwipe = 0;
+
+  function goNext()     { slides.scrollBy({ left:  slides.clientWidth }); }
+  function goPrevious() { slides.scrollBy({ left: -slides.clientWidth }); }
+
+  function analyze() {
+    ctx.drawImage(video, 0, 0, W, H);
+    const d = ctx.getImageData(0, 0, W, H).data;
+    const gray = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) gray[i] = (d[i*4] + d[i*4+1] + d[i*4+2]) / 3;
+
+    if (prev) {
+      let sumX = 0, count = 0;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          if (Math.abs(gray[y*W + x] - prev[y*W + x]) > 30) { sumX += x; count++; }
+        }
+      }
+      const now = Date.now();
+      if (count > 80) {
+        const cx = 1 - (sumX / count) / W;
+        track.push({ x: cx, t: now });
+        track = track.filter(p => now - p.t < 400);
+        statusEl.textContent = "Motion detected";
+        if (now - lastSwipe > 900 && track.length >= 3) {
+          const diff = cx - track[0].x;
+          if (diff > 0.25)  { goNext();     lastSwipe = now; track = []; statusEl.textContent = "Swiped right"; }
+          if (diff < -0.25) { goPrevious(); lastSwipe = now; track = []; statusEl.textContent = "Swiped left"; }
+        }
+      } else {
+        track = [];
+        statusEl.textContent = "Waiting for movement";
+      }
+    }
+    prev = gray;
+  }
+
+  document.getElementById("start").addEventListener("click", async function () {
+    this.style.display = "none";
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+      setInterval(analyze, 50);
+      statusEl.textContent = "Waiting for movement";
+    } catch (e) {
+      statusEl.textContent = "Camera blocked: " + e.name;
+    }
+  });
+</script>
+</body>
+  </html>
